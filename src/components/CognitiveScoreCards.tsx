@@ -1,12 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Brain, Eye, Hand, MessageSquare, Map, Clock } from "lucide-react";
+import { Brain, Eye, MessageSquare, Map, Clock, Info } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
 interface MMSEResult {
   test: string;
   score: number;
   maxScore: number;
+  audioUrl?: string;
+  imageUrl?: string;
+  description?: string;
 }
 
 interface CognitiveScoreCardsProps {
@@ -123,14 +129,85 @@ export const CognitiveScoreCards = ({ scores }: CognitiveScoreCardsProps) => {
                   {/* 詳細測驗項目 */}
                   <div className="mt-3 space-y-1">
                     {domainScore.tests.map((test, testIndex) => (
-                      <div key={testIndex} className="flex justify-between text-xs text-muted-foreground">
-                        <span className="truncate pr-1" title={test.test}>
-                          {test.test.length > 12 ? test.test.substring(0, 12) + '...' : test.test}
-                        </span>
-                        <span className="font-medium">
-                          {test.score}/{test.maxScore}
-                        </span>
-                      </div>
+                      <Dialog key={testIndex}>
+                        <DialogTrigger asChild>
+                          <div className="flex justify-between items-center text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors group">
+                            <span className="truncate pr-1 group-hover:underline" title={test.test}>
+                              {test.test.length > 12 ? test.test.substring(0, 12) + '...' : test.test}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">
+                                {test.score}/{test.maxScore}
+                              </span>
+                              <Info className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          </div>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle className="text-xl">{test.test}</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            {/* 分數顯示 */}
+                            <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                              <div className="text-center">
+                                <div className="text-3xl font-bold text-primary">
+                                  {test.score}
+                                </div>
+                                <div className="text-sm text-muted-foreground">得分</div>
+                              </div>
+                              <div className="text-2xl text-muted-foreground">/</div>
+                              <div className="text-center">
+                                <div className="text-3xl font-bold text-muted-foreground">
+                                  {test.maxScore}
+                                </div>
+                                <div className="text-sm text-muted-foreground">滿分</div>
+                              </div>
+                              <div className="flex-1 ml-4">
+                                <Progress 
+                                  value={(test.score / test.maxScore) * 100} 
+                                  className="h-3"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 描述 */}
+                            {test.description && (
+                              <div className="p-4 bg-accent/10 rounded-lg">
+                                <h4 className="font-semibold mb-2 text-foreground">測驗表現</h4>
+                                <p className="text-sm text-muted-foreground">{test.description}</p>
+                              </div>
+                            )}
+
+                            {/* 圖片 */}
+                            {test.imageUrl && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-foreground">測驗畫面</h4>
+                                <img 
+                                  src={test.imageUrl} 
+                                  alt={test.test}
+                                  className="w-full rounded-lg shadow-md"
+                                />
+                              </div>
+                            )}
+
+                            {/* 音檔 */}
+                            {test.audioUrl && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-foreground">測驗錄音</h4>
+                                <audio 
+                                  controls 
+                                  className="w-full"
+                                  preload="metadata"
+                                >
+                                  <source src={test.audioUrl} type="audio/mpeg" />
+                                  您的瀏覽器不支援音訊播放
+                                </audio>
+                              </div>
+                            )}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                     ))}
                   </div>
                 </div>
