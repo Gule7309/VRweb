@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Brain, Eye, MessageSquare, Map, Clock, Info } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState } from "react";
 
 interface MMSEResult {
@@ -144,74 +143,69 @@ export const CognitiveScoreCards = ({ scores }: CognitiveScoreCardsProps) => {
                             </div>
                           </div>
                         </DialogTrigger>
-                        <DialogContent className="max-w-3xl max-h-[90vh] p-0">
-                          <DialogHeader className="p-6 pb-0">
-                            <DialogTitle className="text-2xl">{test.test}</DialogTitle>
+                        <DialogContent className="max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle className="text-xl">{test.test}</DialogTitle>
                           </DialogHeader>
-                          <ScrollArea className="max-h-[calc(90vh-100px)] px-6">
-                            <div className="space-y-6 pb-6">
-                              {/* 分數顯示 */}
-                              <div className="flex items-center gap-4 p-6 bg-muted rounded-lg">
-                                <div className="text-center">
-                                  <div className="text-4xl font-bold text-primary">
-                                    {test.score}
-                                  </div>
-                                  <div className="text-sm text-muted-foreground mt-1">得分</div>
+                          <div className="space-y-4">
+                            {/* 分數顯示 */}
+                            <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                              <div className="text-center">
+                                <div className="text-3xl font-bold text-primary">
+                                  {test.score}
                                 </div>
-                                <div className="text-3xl text-muted-foreground">/</div>
-                                <div className="text-center">
-                                  <div className="text-4xl font-bold text-muted-foreground">
-                                    {test.maxScore}
-                                  </div>
-                                  <div className="text-sm text-muted-foreground mt-1">滿分</div>
-                                </div>
-                                <div className="flex-1 ml-6">
-                                  <Progress 
-                                    value={(test.score / test.maxScore) * 100} 
-                                    className="h-4"
-                                  />
-                                  <div className="text-right mt-2 text-sm font-medium text-primary">
-                                    {Math.round((test.score / test.maxScore) * 100)}%
-                                  </div>
-                                </div>
+                                <div className="text-sm text-muted-foreground">得分</div>
                               </div>
-
-                              {/* 描述 */}
-                              {test.description && (
-                                <div className="p-4 bg-accent/10 rounded-lg">
-                                  <h4 className="font-semibold mb-2 text-foreground">測驗表現</h4>
-                                  <p className="text-sm text-muted-foreground leading-relaxed">{test.description}</p>
+                              <div className="text-2xl text-muted-foreground">/</div>
+                              <div className="text-center">
+                                <div className="text-3xl font-bold text-muted-foreground">
+                                  {test.maxScore}
                                 </div>
-                              )}
-
-                              {/* 圖片 */}
-                              {test.imageUrl && (
-                                <div>
-                                  <h4 className="font-semibold mb-3 text-foreground">測驗畫面</h4>
-                                  <img 
-                                    src={test.imageUrl} 
-                                    alt={test.test}
-                                    className="w-full rounded-lg shadow-lg border"
-                                  />
-                                </div>
-                              )}
-
-                              {/* 音檔 */}
-                              {test.audioUrl && (
-                                <div>
-                                  <h4 className="font-semibold mb-3 text-foreground">測驗錄音</h4>
-                                  <audio 
-                                    controls 
-                                    className="w-full"
-                                    preload="metadata"
-                                  >
-                                    <source src={test.audioUrl} type="audio/mpeg" />
-                                    您的瀏覽器不支援音訊播放
-                                  </audio>
-                                </div>
-                              )}
+                                <div className="text-sm text-muted-foreground">滿分</div>
+                              </div>
+                              <div className="flex-1 ml-4">
+                                <Progress 
+                                  value={(test.score / test.maxScore) * 100} 
+                                  className="h-3"
+                                />
+                              </div>
                             </div>
-                          </ScrollArea>
+
+                            {/* 描述 */}
+                            {test.description && (
+                              <div className="p-4 bg-accent/10 rounded-lg">
+                                <h4 className="font-semibold mb-2 text-foreground">測驗表現</h4>
+                                <p className="text-sm text-muted-foreground">{test.description}</p>
+                              </div>
+                            )}
+
+                            {/* 圖片 */}
+                            {test.imageUrl && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-foreground">測驗畫面</h4>
+                                <img 
+                                  src={test.imageUrl} 
+                                  alt={test.test}
+                                  className="w-full rounded-lg shadow-md"
+                                />
+                              </div>
+                            )}
+
+                            {/* 音檔 */}
+                            {test.audioUrl && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-foreground">測驗錄音</h4>
+                                <audio 
+                                  controls 
+                                  className="w-full"
+                                  preload="metadata"
+                                >
+                                  <source src={test.audioUrl} type="audio/mpeg" />
+                                  您的瀏覽器不支援音訊播放
+                                </audio>
+                              </div>
+                            )}
+                          </div>
                         </DialogContent>
                       </Dialog>
                     ))}
