@@ -1,3 +1,9 @@
+import { useState, useEffect } from "react";
+// 匯入所有需要的 Firestore 函式
+import { db } from "@/firebase";
+import { doc, getDoc, collection, getDocs, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+
+// 匯入您的所有元件
 import { PatientInfoCard } from "@/components/PatientInfoCard";
 import { MMSERadarChart } from "@/components/MMSERadarChart";
 import { HandMovementVisualization } from "@/components/HandMovementVisualization";
@@ -5,109 +11,142 @@ import { CognitiveScoreCards } from "@/components/CognitiveScoreCards";
 import { RiskAssessment } from "@/components/RiskAssessment";
 import { TrendChart } from "@/components/TrendChart";
 
-const Index = () => {
-  // 模擬患者數據
-  const patientData = {
-    name: "李小明",
-    age: 68,
-    gender: "男性",
-    testDate: "2024-01-15",
-    testDuration: "32分鐘",
-    vrDevice: "Meta Quest 3",
-    totalScore: 26,
-    maxScore: 30,
-  };
+// 您的預設假資料 (作為基底)
+const defaultPatientData = {
+  name: "李小明",
+  age: 68,
+  gender: "男性",
+  testDate: "2024-01-15",
+  testDuration: "32分鐘",
+  vrDevice: "Meta Quest 2",
+  totalScore: 26,
+  maxScore: 30,
+};
 
-  const mmseResults = [
-    { 
-      test: "定向力(時間)", 
-      score: 4, 
-      maxScore: 5,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1501139083538-0139583c060f?w=400",
-      description: "患者能正確回答大部分時間相關問題，僅在具體日期上略有遲疑"
-    },
-    { 
-      test: "定向力(地點)", 
-      score: 5, 
-      maxScore: 5,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400",
-      description: "患者能完全正確識別所在地點及其周邊環境"
-    },
-    { 
-      test: "即時記憶", 
-      score: 3, 
-      maxScore: 3,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400",
-      description: "短期記憶表現良好，能立即復述所有項目"
-    },
-    { 
-      test: "注意力與計算", 
-      score: 3, 
-      maxScore: 5,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1554224311-beee460c201a?w=400",
-      description: "計算能力中等，在連續計算時出現輕微錯誤"
-    },
-    { 
-      test: "延遲記憶", 
-      score: 2, 
-      maxScore: 3,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?w=400",
-      description: "延遲記憶稍弱，部分項目需要提示才能回憶"
-    },
-    { 
-      test: "命名", 
-      score: 2, 
-      maxScore: 2,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=400",
-      description: "物品命名能力正常，反應迅速"
-    },
-    { 
-      test: "複述", 
-      score: 1, 
-      maxScore: 1,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1488190211105-8b0e65b80b4e?w=400",
-      description: "語句複述準確無誤"
-    },
-    { 
-      test: "三步驟指令", 
-      score: 2, 
-      maxScore: 3,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
-      description: "能執行多數指令，但在第三步驟時略顯困難"
-    },
-    { 
-      test: "閱讀", 
-      score: 1, 
-      maxScore: 1,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400",
-      description: "閱讀理解能力良好"
-    },
-    { 
-      test: "書寫", 
-      score: 1, 
-      maxScore: 1,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1455390582262-044cdead277a?w=400",
-      description: "書寫表達清晰完整"
-    },
-    { 
-      test: "視覺建構", 
-      score: 2, 
-      maxScore: 1,
-      audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3",
-      imageUrl: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400",
-      description: "視覺空間能力優異，圖形繪製準確"
-    },
-  ];
+const defaultMmseResults = [
+  // ... (您的 11 個測驗項目假資料) ...
+  { test: "定向力(時間)", score: 4, maxScore: 5, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "定向力(地點)", score: 5, maxScore: 5, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "即時記憶", score: 3, maxScore: 3, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "注意力與計算", score: 3, maxScore: 5, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "延遲記憶", score: 2, maxScore: 3, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "命名", score: 2, maxScore: 2, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "複述", score: 1, maxScore: 1, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "三步驟指令", score: 2, maxScore: 3, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "閱讀", score: 1, maxScore: 1, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "書寫", score: 1, maxScore: 1, audioUrl: "...", imageUrl: "...", description: "..." },
+  { test: "視覺建構", score: 1, maxScore: 1, audioUrl: "...", imageUrl: "...", description: "..." },
+];
+
+const Index = () => {
+  const [patientData, setPatientData] = useState(defaultPatientData);
+  const [mmseResults, setMmseResults] = useState(defaultMmseResults);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  // --- 最終版的 useEffect ---
+  useEffect(() => {
+    const userId = "17yNY7EQwUOK9Ai8O0fFIVhED1J3";
+
+    // 2. 建立查詢 (這部分不變)
+    const testsCollectionRef = collection(db, "Users", userId, "tests");
+    const latestTestQuery = query(
+      testsCollectionRef,
+      orderBy("startTimestamp", "desc"),
+      limit(1)
+    );
+
+    // 3. 將 getDocs 替換為 onSnapshot
+    // onSnapshot 會回傳一個 "unsubscribe" 函式，我們用它來在元件卸載時關閉監聽
+    const unsubscribe = onSnapshot(latestTestQuery, async (testsSnapshot) => {
+      try {
+        if (testsSnapshot.empty) {
+          setError(new Error(`使用者 ${userId} 沒有任何測驗紀錄`));
+          setIsLoading(false);
+          return;
+        }
+
+        // 當有新測驗時，這裡的程式碼會被 "自動" 重新執行
+        const latestTestDoc = testsSnapshot.docs[0];
+        const latestTestId = latestTestDoc.id;
+        const latestTestData = latestTestDoc.data();
+        
+        // (後續的資料處理邏輯完全一樣)
+        let combinedPatientData = { ...defaultPatientData };
+        let combinedMmseResults = defaultMmseResults.map(item => ({ ...item }));
+
+        const userDocRef = doc(db, "Users", userId);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          combinedPatientData.name = userData.name || userData.email || combinedPatientData.name;
+          combinedPatientData.age = userData.age || combinedPatientData.age;
+          combinedPatientData.gender = userData.gender || combinedPatientData.gender;
+        }
+
+        if (latestTestData.startTimestamp) {
+          combinedPatientData.testDate = latestTestData.startTimestamp.toDate().toLocaleString('zh-TW');
+        }
+
+        const levelsCollectionRef = collection(db, "Users", userId, "tests", latestTestId, "levelResults");
+        const levelsSnapshot = await getDocs(levelsCollectionRef);
+
+        if (!levelsSnapshot.empty) {
+          levelsSnapshot.forEach((levelDoc) => {
+            const levelId = levelDoc.id;
+            const levelIndex = parseInt(levelId.split('_')[1]);
+            if (!isNaN(levelIndex) && levelIndex < combinedMmseResults.length) {
+              combinedMmseResults[levelIndex].score = levelDoc.data().score ?? combinedMmseResults[levelIndex].score;
+            }
+          });
+          combinedPatientData.totalScore = combinedMmseResults.reduce((sum, item) => sum + item.score, 0);
+        }
+        
+        setPatientData(combinedPatientData);
+        setMmseResults(combinedMmseResults);
+        setError(null); // 清除舊的錯誤
+
+      } catch (err: any) {
+        console.error("處理即時資料更新時失敗:", err);
+        setError(err);
+      } finally {
+        setIsLoading(false); // 不論如何，結束載入狀態
+      }
+    }, (error) => {
+        // onSnapshot 的第二個參數是錯誤處理函式
+        console.error("Firebase 監聽器發生錯誤:", error);
+        setError(error);
+        setIsLoading(false);
+    });
+
+    // 4. useEffect 現在會回傳一個 "清理函式 (Cleanup Function)"
+    // 當元件要從畫面上移除時 (例如使用者跳到別的頁面)，React 會呼叫這個函式
+    // 我們在這裡關閉監聽，以避免記憶體洩漏和不必要的網路連線
+    return () => {
+      unsubscribe();
+    };
+
+  }, []); // 空陣列仍然保留，因為我們只需要 "設定" 這個監聽器一次
+
+  // (您的 JSX 渲染部分，完全不需變動)
+  if (isLoading) {
+    return (
+      <div className="min-h-screen p-6 flex justify-center items-center">
+        <p className="text-xl text-muted-foreground">資料載入中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+     return (
+      <div className="min-h-screen p-6 flex justify-center items-center">
+        <div className="bg-destructive/10 text-destructive p-4 rounded-md">
+          <h2 className="font-bold">資料載入失敗</h2>
+          <p>{error.message}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -121,31 +160,18 @@ const Index = () => {
             基於虛擬實境技術的迷你心智狀態檢查結果與認知功能評估
           </p>
         </div>
-
-        {/* Patient Info */}
         <PatientInfoCard patient={patientData} />
-
-        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* MMSE Radar Chart */}
           <div className="lg:col-span-1">
             <MMSERadarChart data={mmseResults} />
           </div>
-
-          {/* Hand Movement Visualization */}
           <div className="lg:col-span-1">
             <HandMovementVisualization />
           </div>
         </div>
-
-        {/* Cognitive Score Cards */}
         <CognitiveScoreCards scores={mmseResults} />
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Risk Assessment */}
           <RiskAssessment totalScore={patientData.totalScore} />
-
-          {/* Trend Chart */}
           <TrendChart />
         </div>
       </div>
