@@ -33,28 +33,28 @@ export const CognitiveScoreCards = ({ scores }: CognitiveScoreCardsProps) => {
     {
       name: "記憶力",
       icon: Brain,
-      tests: ["即時記憶", "延遲記憶"],
+      tests: ["短期記憶", "近期記憶"],
       color: "text-chart-2", 
       bgColor: "bg-chart-2/10"
     },
     {
       name: "注意力與計算",
       icon: Clock,
-      tests: ["注意力與計算"],
+      tests: ["注意力"],
       color: "text-chart-3",
       bgColor: "bg-chart-3/10"
     },
     {
       name: "語言能力",
       icon: MessageSquare,
-      tests: ["命名", "複述", "三步驟指令", "閱讀", "書寫"],
+      tests: ["命名", "重複語句", "理解指令", "理解文字", "語句完整度"],
       color: "text-chart-4",
       bgColor: "bg-chart-4/10"
     },
     {
       name: "視覺空間",
       icon: Eye,
-      tests: ["視覺建構"],
+      tests: ["畫圖"],
       color: "text-chart-5",
       bgColor: "bg-chart-5/10"
     }
