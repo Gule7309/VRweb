@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 // 匯入所有需要的 Firestore 函式
 import { db } from "@/firebase";
-import { doc, getDoc, collection, getDocs, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+// (已移除 limit)
+import { doc, getDoc, collection, getDocs, query, orderBy, onSnapshot } from "firebase/firestore";
 
 // 匯入您的所有元件
 import { PatientInfoCard } from "@/components/PatientInfoCard";
@@ -49,61 +50,151 @@ const defaultMmseResults = [
   { test: "畫圖", score: 1, maxScore: 1, audioUrls: [], imageUrl: "...", description: "..." },
 ];
 
-// 1. 建立一個從 Firebase level ID 到 mmseResults 陣列索引的 "對應表"
-// (已根據您的最新列表更新)
+// 您的 levelId 對應表
 const levelIdToMmseIndex: { [key: string]: number } = {
-  // 'Firebase文件ID': 陣列索引 (來自 defaultMmseResults)
-  'level_2': 0,        // 定向力(時間)
-  'level_9': 1,        // 定向力(地點)
-  'level_8_Round1': 2, // 短期記憶
-  'level_7': 3,        // 注意力 (算數)
-  'level_8_Round2': 4, // 近期記憶
-  'level_5': 5,        // 命名
-  'level_6': 6,        // 重複語句
-  'level_4': 7,        // 理解指令
-  'level_10': 8,       // 理解文字
-  'level_3': 9,        // 語句完整度
-  'level_1': 10,       // 畫圖
-  
-  // level_0 (規則) 沒有對應到 MMSE 項目，所以會被忽略
+  'level_2': 0, 'level_9': 1, 'level_8_Round1': 2, 'level_7': 3,
+  'level_8_Round2': 4, 'level_5': 5, 'level_6': 6, 'level_4': 7,
+  'level_10': 8, 'level_3': 9, 'level_1': 10,
 };
 
+// --- 變更: 複製 CognitiveScoreCards 的分域設定，用於計算歷史資料 ---
+const cognitiveDomains = [
+  { name: "定向力", tests: ["定向力(時間)", "定向力(地點)"] },
+  { name: "記憶力", tests: ["短期記憶", "近期記憶"] },
+  { name: "注意力", tests: ["注意力"] },
+  { name: "語言能力", tests: ["命名", "重複語句", "理解指令", "理解文字", "語句完整度"] },
+  { name: "視覺空間", tests: ["畫圖"] }
+];
+
+// --- 變更: 匯出 HistoricalTrendData 型別 ---
+export interface HistoricalTrendData {
+  score: number;
+  date: Date;
+}
+
+// --- 變更: 匯出 TrendChartDataPoint 型別 ---
+export interface TrendChartDataPoint {
+  month: string;
+  總分: number;
+  定向力: number;
+  記憶力: number;
+  注意力: number;
+  語言能力: number;
+  視覺空間: number;
+}
+
+// 幫手函式：將 Date 物件格式化為 "X個月前" 或 "本日"
+const formatTrendDate = (date: Date) => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const compareDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffTime = today.getTime() - compareDate.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "本日";
+  if (diffDays < 30) return `${diffDays}天前`;
+  const diffMonths = Math.round(diffDays / 30.44);
+  if (diffMonths <= 0) return "本月";
+  if (diffMonths <= 12) return `${diffMonths}個月前`;
+  const diffYears = Math.round(diffDays / 365.25);
+  return `${diffYears}年前`;
+};
+
+
 const Index = () => {
+  // State for latest data
   const [patientData, setPatientData] = useState(defaultPatientData);
   const [mmseResults, setMmseResults] = useState(defaultMmseResults);
+  
+  // --- 變更: 建立 "所有" 測驗的歷史紀錄 State ---
+  const [historicalData, setHistoricalData] = useState<HistoricalTrendData[]>([]);
+  const [trendChartData, setTrendChartData] = useState<TrendChartDataPoint[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    // 您的 User ID
     const userId = "17yNY7EQwUOK9Ai8O0fFIVhED1J3";
 
-    // 建立查詢，尋找最新的測驗
     const testsCollectionRef = collection(db, "Users", userId, "tests");
-    const latestTestQuery = query(
+    // --- 變更: 查詢 "所有" 測驗，不再 limit(1) ---
+    const allTestsQuery = query(
       testsCollectionRef,
-      orderBy("startTimestamp", "desc"),
-      limit(1)
+      orderBy("startTimestamp", "desc") // 仍然排序，最新的在最前面
     );
 
-    // 使用 onSnapshot 建立即時監聽
-    const unsubscribe = onSnapshot(latestTestQuery, async (testsSnapshot) => {
+    const unsubscribe = onSnapshot(allTestsQuery, async (allTestsSnapshot) => {
       try {
-        if (testsSnapshot.empty) {
+        if (allTestsSnapshot.empty) {
           setError(new Error(`使用者 ${userId} 沒有任何測驗紀錄`));
           setIsLoading(false);
           return;
         }
 
-        const latestTestDoc = testsSnapshot.docs[0];
+        // --- 變更: 繁重的資料處理開始 ---
+
+        // 1. 處理 "RiskAssessment" 的資料 (輕量)
+        const trendDataForRisk = allTestsSnapshot.docs
+          .map(doc => ({
+            score: doc.data().totalScore,
+            date: doc.data().startTimestamp.toDate()
+          }))
+          .reverse(); // 變為時間正序
+        setHistoricalData(trendDataForRisk);
+
+        // 2. 處理 "TrendChart" 的資料 (重量級)
+        // 我們將遍歷 "所有" 測驗，並為 "每一筆" 抓取 "levelResults"
+        const chartDataPromises = allTestsSnapshot.docs.map(async (testDoc) => {
+          const testData = testDoc.data();
+          const levelsSnapshot = await getDocs(collection(db, testDoc.ref.path, "levelResults"));
+
+          // a. 建立此單次測驗的分數對照表
+          const testScores: { [mmseTestName: string]: { score: number, maxScore: number } } = {};
+          levelsSnapshot.forEach(levelDoc => {
+            const levelId = levelDoc.id;
+            const levelData = levelDoc.data();
+            const mmseIndex = levelIdToMmseIndex[levelId];
+            if (mmseIndex !== undefined) {
+              const mmseItem = defaultMmseResults[mmseIndex];
+              testScores[mmseItem.test] = {
+                score: levelData.score,
+                maxScore: mmseItem.maxScore
+              };
+            }
+          });
+
+          // b. 計算五大領域分數
+          const domainScores = { '定向力': 0, '記憶力': 0, '注意力': 0, '語言能力': 0, '視覺空間': 0 };
+          cognitiveDomains.forEach(domain => {
+            domain.tests.forEach(testName => {
+              if (testScores[testName]) {
+                domainScores[domain.name] += testScores[testName].score;
+              }
+            });
+          });
+
+          // c. 回傳圖表所需物件
+          return {
+            month: formatTrendDate(testData.startTimestamp.toDate()),
+            總分: testData.totalScore,
+            ...domainScores
+          };
+        });
+        
+        // 等待所有歷史資料都處理完畢
+        const processedChartData = await Promise.all(chartDataPromises);
+        setTrendChartData(processedChartData.reverse()); // 變為時間正序
+
+        // --- 變更結束 ---
+
+        // --- 3. 處理 "最新一筆" 測驗的詳細資料 (給儀表板上半部) ---
+        // (這部分邏輯與您上一版完全相同，只是我們從 allTestsSnapshot 中取第0筆)
+        const latestTestDoc = allTestsSnapshot.docs[0];
         const latestTestId = latestTestDoc.id;
         const latestTestData = latestTestDoc.data();
         
-        // 準備好預設的資料
         let combinedPatientData = { ...defaultPatientData };
         let combinedMmseResults = defaultMmseResults.map(item => ({ ...item }));
 
-        // --- 2. 填入使用者資料 (來自 User 文件) ---
         const userDocRef = doc(db, "Users", userId);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
@@ -113,76 +204,49 @@ const Index = () => {
           combinedPatientData.gender = userData.gender || combinedPatientData.gender;
         }
 
-        // --- 3. 填入測驗總結資料 (來自 test 文件) ---
         if (latestTestData.startTimestamp) {
           combinedPatientData.testDate = latestTestData.startTimestamp.toDate().toLocaleString('zh-TW');
         }
         combinedPatientData.totalScore = latestTestData.totalScore ?? combinedPatientData.totalScore;
         combinedPatientData.testDuration = latestTestData.totalTime ?? combinedPatientData.testDuration;
 
-        // --- 4. 填入 "levelResults" 的詳細資料 ---
         const levelsCollectionRef = collection(db, "Users", userId, "tests", latestTestId, "levelResults");
-        const levelsSnapshot = await getDocs(levelsCollectionRef);
+        const levelsSnapshotForLatest = await getDocs(levelsCollectionRef); // 抓取最新一筆的levelResults
 
-        if (!levelsSnapshot.empty) {
-          levelsSnapshot.forEach((levelDoc) => {
-            const levelId = levelDoc.id; // "level_0", "level_1", "level_8_Round1" ...
+        if (!levelsSnapshotForLatest.empty) {
+          levelsSnapshotForLatest.forEach((levelDoc) => {
+            const levelId = levelDoc.id;
             const levelData = levelDoc.data();
-            
-            // 使用 "對應表" 找到它在陣列中的位置
             const mmseIndex = levelIdToMmseIndex[levelId];
             
             if (mmseIndex !== undefined) {
               const targetItem = combinedMmseResults[mmseIndex];
-              
-              // A. 填入分數
               targetItem.score = levelData.score ?? targetItem.score;
-              
-              // B. 填入檔案 (音檔陣列、圖片等)
-              targetItem.audioUrls = []; // <-- 初始化為空陣列
+              targetItem.audioUrls = [];
               if (levelData.files) {
-                const files = levelData.files; // 取得 files 物件
-
-                if (levelId === 'level_1') { // 畫圖
-                  targetItem.imageUrl = files.userPngUrl || targetItem.imageUrl;
-                }
-                if (levelId === 'level_3') { // 語句完整度
-                  if (files.sentence_wavUrl) targetItem.audioUrls.push(files.sentence_wavUrl);
-                }
-                if (levelId === 'level_5') { // 命名
-                  // 檢查 level_5 的所有音檔
+                const files = levelData.files;
+                if (levelId === 'level_1') targetItem.imageUrl = files.userPngUrl || targetItem.imageUrl;
+                if (levelId === 'level_3') if (files.sentence_wavUrl) targetItem.audioUrls.push(files.sentence_wavUrl);
+                if (levelId === 'level_5') {
                   if (files.voice_1Url) targetItem.audioUrls.push(files.voice_1Url);
                   if (files.voice_2Url) targetItem.audioUrls.push(files.voice_2Url);
                 }
-                if (levelId === 'level_6') { // 重複語句
-                  if (files['重複語句_wavDataUrl']) targetItem.audioUrls.push(files['重複語句_wavDataUrl']);
-                }
-                if (levelId === 'level_7') { // 注意力 (算數)
-                  // 遍歷 files 物件，找出所有相關音檔
-                  for (const key in files) {
-                    if (key.startsWith('減法運算_Q') && key.endsWith('.wavUrl')) {
-                      targetItem.audioUrls.push(files[key]);
-                    }
-                  }
-                  targetItem.audioUrls.sort(); // 對音檔排序
+                if (levelId === 'level_6') if (files['重複語句_wavDataUrl']) targetItem.audioUrls.push(files['重複語句_wavDataUrl']);
+                if (levelId === 'level_7') {
+                  for (const key in files) if (key.startsWith('減法運算_Q') && key.endsWith('.wavUrl')) targetItem.audioUrls.push(files[key]);
+                  targetItem.audioUrls.sort();
                 }
               }
-
-              // C. [可選] 覆蓋描述文字
-              if (levelId === 'level_10') { // 理解文字
+              if (levelId === 'level_10') {
                 const chosen = levelData.chosenOption?.option;
                 const correct = levelData.correctOption?.option;
-                if (chosen !== correct) {
-                  targetItem.description = `患者選擇了 "${chosen}"，但正確答案是 "${correct}"。`;
-                } else {
-                  targetItem.description = `患者正確選擇了 "${chosen}"。`;
-                }
+                if (chosen !== correct) targetItem.description = `患者選擇了 "${chosen}"，但正確答案是 "${correct}"。`;
+                else targetItem.description = `患者正確選擇了 "${chosen}"。`;
               }
             }
           });
         }
         
-        // --- 5. 更新 React State ---
         setPatientData(combinedPatientData);
         setMmseResults(combinedMmseResults);
         setError(null);
@@ -199,32 +263,15 @@ const Index = () => {
       setIsLoading(false);
     });
 
-    // 清理函式
     return () => {
       unsubscribe();
     };
 
-  }, []); // 空陣列，只設定一次監聽器
+  }, []);
 
-  // (您的 JSX 渲染部分，完全不需變動)
-  if (isLoading) {
-    return (
-      <div className="min-h-screen p-6 flex justify-center items-center">
-        <p className="text-xl text-muted-foreground">資料載入中...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-     return (
-      <div className="min-h-screen p-6 flex justify-center items-center">
-        <div className="bg-destructive/10 text-destructive p-4 rounded-md">
-          <h2 className="font-bold">資料載入失敗</h2>
-          <p>{error.message}</p>
-        </div>
-      </div>
-    );
-  }
+  // (您的 JSX 渲染部分... )
+  if (isLoading) { /* ... */ }
+  if (error) { /* ... */ }
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -238,6 +285,8 @@ const Index = () => {
             基於虛擬實境技術的迷你心智狀態檢查結果與認知功能評估
           </p>
         </div>
+        
+        {/* 這些元件仍然只顯示 "最新" 的資料 */}
         <PatientInfoCard patient={patientData} />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="lg:col-span-1">
@@ -248,9 +297,17 @@ const Index = () => {
           </div>
         </div>
         <CognitiveScoreCards scores={mmseResults} />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RiskAssessment totalScore={patientData.totalScore} />
-          <TrendChart />
+          
+          {/* --- 變更: 傳入 "historicalData" (總分歷史) --- */}
+          <RiskAssessment 
+            totalScore={patientData.totalScore} 
+            trendData={historicalData} 
+          />
+          
+          {/* --- 變更: 傳入 "trendChartData" (分項歷史) --- */}
+          <TrendChart data={trendChartData} />
         </div>
       </div>
     </div>
