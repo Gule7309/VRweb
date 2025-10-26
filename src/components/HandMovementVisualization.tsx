@@ -1,18 +1,19 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Move3D, TrendingUp, Zap, RotateCcw } from "lucide-react";
+// --- 移除 Zap 和 RotateCcw ---
+import { Move3D, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export const HandMovementVisualization = () => {
   const [animationPhase, setAnimationPhase] = useState(0);
 
-  // 模擬3D移動數據
+  // 模擬3D移動數據 (只保留 avgVelocity)
   const movementData = {
     avgVelocity: 0.85, // m/s
-    tremor: 0.12, // 震顫指數
-    precision: 0.78, // 精確度
-    stability: 0.69, // 穩定性
-    pathEfficiency: 0.73, // 路徑效率
+    // tremor: 0.12, // 移除
+    // precision: 0.78, // 移除
+    // stability: 0.69, // 移除
+    // pathEfficiency: 0.73, // 移除
   };
 
   useEffect(() => {
@@ -22,12 +23,12 @@ export const HandMovementVisualization = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // (保留輔助函式，因為 avgVelocity 仍會用到)
   const getMetricColor = (value: number) => {
     if (value >= 0.8) return "text-success";
     if (value >= 0.6) return "text-warning";
     return "text-destructive";
   };
-
   const getMetricBadge = (value: number) => {
     if (value >= 0.8) return { label: "優秀", color: "bg-success text-white" };
     if (value >= 0.6) return { label: "正常", color: "bg-warning text-white" };
@@ -43,14 +44,13 @@ export const HandMovementVisualization = () => {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {/* 3D軌跡可視化區域 */}
+        {/* 3D軌跡可視化區域 (保持不變) */}
         <div className="relative h-48 mb-6 bg-gradient-to-br from-primary/5 to-accent/5 rounded-lg border border-primary/20 overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center">
             {/* 模擬3D軌跡 */}
             <div className="relative w-32 h-32">
               {/* 中心點 */}
               <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-primary rounded-full transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
-              
               {/* 軌跡路徑 */}
               <svg className="w-full h-full" viewBox="0 0 128 128">
                 <path
@@ -72,9 +72,8 @@ export const HandMovementVisualization = () => {
                   className={`transition-all duration-1000 ${animationPhase % 2 === 1 ? 'opacity-40' : 'opacity-20'}`}
                 />
               </svg>
-              
               {/* 移動點 */}
-              <div 
+              <div
                 className={`absolute w-3 h-3 bg-accent rounded-full transition-all duration-1000 ${
                   animationPhase === 0 ? 'top-8 left-8' :
                   animationPhase === 1 ? 'top-8 right-8' :
@@ -84,7 +83,6 @@ export const HandMovementVisualization = () => {
               ></div>
             </div>
           </div>
-          
           {/* 座標軸標示 */}
           <div className="absolute bottom-2 left-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
@@ -98,9 +96,10 @@ export const HandMovementVisualization = () => {
           </div>
         </div>
 
-        {/* 移動指標 */}
+        {/* 移動指標 (只保留平均速度和AI建議) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-3">
+            {/* 平均速度 */}
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-chart-1" />
@@ -108,7 +107,7 @@ export const HandMovementVisualization = () => {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`font-bold ${getMetricColor(movementData.avgVelocity)}`}>
-                  {movementData.avgVelocity} m/s
+                  {movementData.avgVelocity.toFixed(2)} m/s {/* 修正: 使用 toFixed */}
                 </span>
                 <Badge className={getMetricBadge(movementData.avgVelocity).color}>
                   {getMetricBadge(movementData.avgVelocity).label}
@@ -116,39 +115,15 @@ export const HandMovementVisualization = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-chart-3" />
-                <span className="text-sm font-medium">震顫指數</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`font-bold ${getMetricColor(1 - movementData.tremor)}`}>
-                  {movementData.tremor}
-                </span>
-                <Badge className={getMetricBadge(1 - movementData.tremor).color}>
-                  {getMetricBadge(1 - movementData.tremor).label}
-                </Badge>
-              </div>
-            </div>
+            {/* --- 震顫指數區塊已刪除 --- */}
 
-            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center gap-2">
-                <RotateCcw className="h-4 w-4 text-chart-4" />
-                <span className="text-sm font-medium">穩定性</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`font-bold ${getMetricColor(movementData.stability)}`}>
-                  {(movementData.stability * 100).toFixed(0)}%
-                </span>
-                <Badge className={getMetricBadge(movementData.stability).color}>
-                  {getMetricBadge(movementData.stability).label}
-                </Badge>
-              </div>
-            </div>
+            {/* --- 穩定性區塊已刪除 --- */}
+
           </div>
 
           <div className="space-y-3">
-            <div className="p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
+            {/* AI 分析建議 */}
+            <div className="p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 h-full flex flex-col justify-center"> {/* 使用 h-full */}
               <h4 className="font-semibold text-foreground mb-2">AI 分析建議</h4>
               <div className="text-sm text-muted-foreground space-y-1">
                 <p>• 手部震顫程度輕微，在正常範圍內</p>
