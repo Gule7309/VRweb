@@ -1,337 +1,275 @@
 // public/analysis.worker.js
 
-// 1. 引入庫 (與之前相同)
+// 1. 引入庫 (從本地，使用 dsp.js)
 try {
     importScripts(
-      "https://cdn.jsdelivr.net/npm/fili@2.0.3/dist/fili.min.js",
-      "https://cdn.jsdelivr.net/npm/fft.js@4.0.4/dist/fft.min.js"
+      "/fili.min.js",
+      "/dsp.js"       // <-- 使用 dsp.js
     );
   } catch (e) {
     console.error("Failed to import scripts:", e);
+    self.postMessage({ status: 'error', message: `Worker failed to load scripts: ${e.message}` });
+    throw e;
   }
   
-  // 2. 主監聽函數 (修改)
+  // 2. 主監聽函數 (保持不變)
   self.onmessage = (event) => {
     const { csvData, handType, targetSampleRate, taskType } = event.data;
-    // taskType: 'tapping', 'reaching', or 'tremor-only'
-  
     if (!csvData) return;
   
     try {
-      // 步驟 A: 解析數據 (修改：增加 trigger)
       const { time, x, y, z, trigger } = parseAndSeparate(csvData, handType);
       if (time.length < 20) throw new Error("數據點不足");
   
-      // 步驟 B: 重採樣 (與之前相同)
       const fs = targetSampleRate;
       const { resampledTime, resampledX, resampledY, resampledZ, resampledTrigger } =
         resampleData(time, x, y, z, trigger, fs);
   
-      // --- 震顫分析 (與之前相同) ---
+      // --- 震顫分析 ---
       const filteredX = applyBandpass(resampledX, fs, 3, 12);
       const filteredY = applyBandpass(resampledY, fs, 3, 12);
       const filteredZ = applyBandpass(resampledZ, fs, 3, 12);
-      
+  
+      // *** 使用 dsp.js 修改後的震顫計算 ***
       const tremorMetrics = calculateTremorMetrics(
         filteredX, filteredY, filteredZ, fs
       );
   
-      // --- 穩定性分析 (新增) ---
+      // --- 穩定性分析 (保持不變) ---
       let stabilityMetrics = {};
       if (taskType && taskType !== 'tremor-only') {
-        // 步驟 C: 分割試驗 (Trial Segmentation)
         const trials = segmentTrials(resampledTime, resampledTrigger);
-        
         if (trials.length < 2) {
           console.warn("試驗次數不足 ( < 2)，無法計算穩定性");
         } else {
-          // 步驟 D: 根據任務類型計算穩定性
           stabilityMetrics = calculateStabilityMetrics(
-            taskType,
-            trials,
-            resampledX,
-            resampledY,
-            resampledZ
+            taskType, trials,
+            resampledX, resampledY, resampledZ
           );
         }
       }
   
-      // 步驟 E: 合併回傳結果
       self.postMessage({
         status: 'success',
-        data: {
-          ...tremorMetrics,  // { peakFrequency, tremorAmplitude, ... }
-          ...stabilityMetrics // { tappingCV, pathRMSD, endpointSD, ... }
-        }
+        data: { ...tremorMetrics, ...stabilityMetrics }
       });
   
     } catch (error) {
-      self.postMessage({ status: 'error', message: error.message });
+      // 確保將詳細錯誤訊息傳回主線程
+      self.postMessage({ status: 'error', message: error.message || 'An unknown error occurred in the worker.' });
     }
   };
   
-  // --- 輔助函數 (修改與新增) ---
+  // --- 輔助函數 ---
   
-  /** * 步驟 A: 解析 (修改) 
-   * 假設 CSV 格式: Type,X,Y,Z,Time,TriggerPressed (第6欄)
-   */
+  // (parseAndSeparate, resampleData, segmentTrials, calculateStabilityMetrics,
+  // calculateTappingCV, calculateReachingStability 與之前相同)
   function parseAndSeparate(csvData, handType) {
     const lines = csvData.trim().split('\n');
     const time = [], x = [], y = [], z = [], trigger = [];
-  
     lines.slice(1).forEach(line => {
       const parts = line.split(',');
-      if (parts[0] === handType) {
-        x.push(parseFloat(parts[1]));
-        y.push(parseFloat(parts[2]));
-        z.push(parseFloat(parts[3]));
-        time.push(parseFloat(parts[4]));
-        trigger.push(parseFloat(parts[5])); // 新增 Trigger
+      if (parts.length >= 6 && parts[0] === handType) { // 增加長度檢查
+        try {
+          x.push(parseFloat(parts[1]));
+          y.push(parseFloat(parts[2]));
+          z.push(parseFloat(parts[3]));
+          time.push(parseFloat(parts[4]));
+          trigger.push(parseFloat(parts[5]));
+        } catch(parseError){
+          console.warn('Skipping invalid CSV line:', line, parseError);
+        }
       }
     });
+    if (time.length === 0) {
+      throw new Error(`No data found for handType "${handType}" in CSV.`);
+    }
     return { time, x, y, z, trigger };
   }
-  
-  /** * 步驟 B: 重採樣 (修改)
-   */
   function resampleData(time, x, y, z, trigger, fs) {
     const resampledTime = [], resampledX = [], resampledY = [], resampledZ = [], resampledTrigger = [];
-    const dt = 1 / fs;
-    const startTime = time[0];
-    const endTime = time[time.length - 1];
-  
-    let currentTime = startTime;
-    let i = 1;
-  
-    while (currentTime <= endTime) {
+    const dt = 1 / fs; const startTime = time[0]; const endTime = time[time.length - 1];
+    let currentTime = startTime; let i = 1;
+    while (currentTime <= endTime && resampledTime.length < 50000) { // 防止無限迴圈
       while (i < time.length && time[i] < currentTime) { i++; }
       if (i >= time.length) break;
-  
       const t1 = time[i - 1], t2 = time[i];
-      const frac = (currentTime - t1) / (t2 - t1);
+      // 防止除以零
+      const frac = (t2 - t1 > 1e-9) ? (currentTime - t1) / (t2 - t1) : 0;
   
       resampledX.push(x[i - 1] + (x[i] - x[i - 1]) * frac);
       resampledY.push(y[i - 1] + (y[i] - y[i - 1]) * frac);
       resampledZ.push(z[i - 1] + (z[i] - z[i - 1]) * frac);
-      
-      // Trigger 是 0/1 訊號，使用 "最近鄰" 插值法 (取前一個值)
-      resampledTrigger.push(trigger[i - 1]); 
-      resampledTime.push(currentTime);
+      resampledTrigger.push(trigger[i - 1]); resampledTime.push(currentTime);
       currentTime += dt;
     }
+     if (resampledTime.length === 0) {
+        throw new Error("Resampling resulted in zero data points. Check input time array.");
+     }
     return { resampledTime, resampledX, resampledY, resampledZ, resampledTrigger };
   }
-  
-  /** * 步驟 C: 分割試驗 (NEW)
-   * 找出 "TriggerPressed" 從 0 變到 1 的 "那個時間點"
-   * 這代表一次點擊 (tap) 或一次到達 (reach)
-   */
   function segmentTrials(time, trigger) {
-    const trials = []; // 儲存每次 "按下" 的事件
-    let wasPressed = false;
-  
+    const trials = []; let wasPressed = false;
     for (let i = 0; i < trigger.length; i++) {
       const isPressed = trigger[i] === 1;
-      if (isPressed && !wasPressed) {
-        // 偵測到 0 -> 1 的上升緣
-        trials.push({
-          time: time[i],
-          index: i
-        });
-      }
+      if (isPressed && !wasPressed) { trials.push({ time: time[i], index: i }); }
       wasPressed = isPressed;
     }
-    return trials; // 返回 [ {time, index}, {time, index}, ... ]
+    return trials;
   }
-  
-  /** * 步驟 D: 穩定性計算主函數 (NEW)
-   */
   function calculateStabilityMetrics(taskType, trials, x, y, z) {
-    if (taskType === 'tapping') {
-      return calculateTappingCV(trials);
-    }
-    if (taskType === 'reaching') {
-      return calculateReachingStability(trials, x, y, z);
-    }
+    if (taskType === 'tapping') { return calculateTappingCV(trials); }
+    if (taskType === 'reaching') { return calculateReachingStability(trials, x, y, z); }
     return {};
   }
-  
-  /** * 實作 (Tapping CV) - 您的文獻第 2, 8 點 (NEW)
-   */
   function calculateTappingCV(trials) {
-    const interTapIntervals = []; // 儲存每次點擊的 "間隔時間"
-    for (let i = 1; i < trials.length; i++) {
-      const interval = trials[i].time - trials[i - 1].time;
-      interTapIntervals.push(interval);
-    }
-  
-    if (interTapIntervals.length === 0) return { tappingCV: 0 };
-    
+    const interTapIntervals = [];
+    for (let i = 1; i < trials.length; i++) { interTapIntervals.push(trials[i].time - trials[i - 1].time); }
+    if (interTapIntervals.length === 0) return { tappingCV: NaN, meanITI: NaN, sdITI: NaN, trialCount: trials.length }; // Use NaN for invalid results
     const { mean, sd } = getMeanSD(interTapIntervals);
-    
-    // CV = (SD / Mean) * 100%
-    const tappingCV = (mean === 0) ? 0 : (sd / mean) * 100;
-    
-    return {
-      tappingCV: tappingCV,       // 節律變異係數 (%)
-      meanITI: mean,              // 平均點擊間隔 (s)
-      sdITI: sd,                  // 點擊間隔標準差 (s)
-      trialCount: trials.length   // 總點擊次數
-    };
+    const tappingCV = (mean === 0) ? NaN : (sd / mean) * 100;
+    return { tappingCV: tappingCV, meanITI: mean, sdITI: sd, trialCount: trials.length };
   }
-  
-  /** * 實作 (Reaching Stability) - 您的文獻第 1, 3 點 (NEW)
-   */
   function calculateReachingStability(trials, x, y, z) {
-    const endpoints = []; // 每次到達的終點 (X,Y,Z)
-    const pathRMSD_list = []; // 每次路徑的 RMSD
-    const movementTimes = []; // 每次移動的時間
-    
-    // 假設試驗是 "從前一個點，移動到下一個點"
+    const endpoints = []; const pathRMSD_list = []; const movementTimes = [];
+    if (trials.length < 2) {
+       return { endpointSD: NaN, pathRMSD: NaN, timeCV: NaN, trialCount: trials.length };
+    }
     for (let i = 1; i < trials.length; i++) {
-      const startTrial = trials[i - 1];
-      const endTrial = trials[i];
-  
-      // 1. 終點位置 (Endpoint Position)
-      const endPos = { 
-        x: x[endTrial.index], 
-        y: y[endTrial.index], 
-        z: z[endTrial.index] 
-      };
+      const startTrial = trials[i - 1]; const endTrial = trials[i];
+       // 確保索引有效
+      if(endTrial.index >= x.length || startTrial.index < 0) {
+          console.warn(`Invalid trial indices: start ${startTrial.index}, end ${endTrial.index}`);
+          continue; // 跳過無效的試驗
+      }
+      const endPos = { x: x[endTrial.index], y: y[endTrial.index], z: z[endTrial.index] };
       endpoints.push(endPos);
-      
-      // 2. 移動時間 (Movement Time)
       movementTimes.push(endTrial.time - startTrial.time);
-  
-      // 3. 路徑 RMSD (Path RMSD) - (您的第 3 點)
-      const startPos = { 
-        x: x[startTrial.index], 
-        y: y[startTrial.index], 
-        z: z[startTrial.index] 
-      };
-      
+      const startPos = { x: x[startTrial.index], y: y[startTrial.index], z: z[startTrial.index] };
       const distances = [];
-      // 遍歷 "這一次" 試驗中的 "所有" 軌跡點
-      for (let j = startTrial.index; j <= endTrial.index; j++) {
-        const currentPos = { x: x[j], y: y[j], z: z[j] };
-        // 計算 "當前點" 到 "理想直線 (起點-終點)" 的垂直距離
-        const dist = getPerpendicularDistance(currentPos, startPos, endPos);
+      // 確保 j 的範圍有效
+      const startIndex = Math.max(0, startTrial.index);
+      const endIndex = Math.min(x.length - 1, endTrial.index);
+      for (let j = startIndex; j <= endIndex; j++) {
+        const dist = getPerpendicularDistance({ x: x[j], y: y[j], z: z[j] }, startPos, endPos);
         distances.push(dist**2);
       }
-      
-      const rmsd = Math.sqrt(getMeanSD(distances).mean); // 均方根偏差
-      pathRMSD_list.push(rmsd);
+       if (distances.length > 0) {
+          pathRMSD_list.push(Math.sqrt(getMeanSD(distances).mean));
+       } else {
+          pathRMSD_list.push(0); // 如果試驗內沒有數據點，偏差為0
+       }
     }
-    
-    // --- 匯總計算 ---
-    
-    // 終點標準差 (Endpoint SD) - (您的第 1 點)
-    // 計算 3D 空間中所有終點的 "質心"
+  
+    if (endpoints.length === 0) {
+        return { endpointSD: NaN, pathRMSD: NaN, timeCV: NaN, trialCount: trials.length };
+    }
+  
     const meanEndpoint = {
       x: getMeanSD(endpoints.map(p => p.x)).mean,
       y: getMeanSD(endpoints.map(p => p.y)).mean,
       z: getMeanSD(endpoints.map(p => p.z)).mean,
     };
-    
-    // 計算每個終點到 "質心" 的距離
     const endpointDistances = endpoints.map(p => getDistance3D(p, meanEndpoint));
-    // 終點的標準差 (SD)
     const endpointSD = getMeanSD(endpointDistances).sd;
-  
-    // 路徑 RMSD 的平均值
     const meanPathRMSD = getMeanSD(pathRMSD_list).mean;
-    
-    // 移動時間的變異係數 (CV) - (您的第 2 點)
     const timeStats = getMeanSD(movementTimes);
-    const timeCV = (timeStats.mean === 0) ? 0 : (timeStats.sd / timeStats.mean) * 100;
-  
-    return {
-      endpointSD: endpointSD, // 終點位置標準差 (m) - 一致性
-      pathRMSD: meanPathRMSD, // 平均路徑均方根偏差 (m) - 平滑度/精確度
-      timeCV: timeCV,         // 移動時間變異係數 (%) - 一致性
-      trialCount: trials.length
-    };
+    const timeCV = (timeStats.mean === 0) ? NaN : (timeStats.sd / timeStats.mean) * 100;
+    return { endpointSD: endpointSD, pathRMSD: meanPathRMSD, timeCV: timeCV, trialCount: trials.length };
   }
   
   
-  // --- 震顫計算 (與之前相同) ---
-  function calculateTremorMetrics(filtX, filtY, filtZ, fs) {
-    // ... (省略與前一回答相同的程式碼) ...
-    // 1. 震顫振幅 (Tremor Amplitude)
-    const tremorMagnitude = filtX.map((val, i) => Math.sqrt(val**2 + filtY[i]**2 + filtZ[i]**2));
-    const rmsSum = tremorMagnitude.reduce((acc, val) => acc + val**2, 0);
-    const tremorAmplitude = Math.sqrt(rmsSum / tremorMagnitude.length);
-    const tremorAmplitudeCm = tremorAmplitude * 100;
-  
-    // 2. 主頻率 (Peak Frequency)
-    const N = 1024;
-    const fft = new Fft.default.Complex(N);
-    const input = new Float64Array(N).fill(0);
-    input.set(tremorMagnitude.slice(0, N));
-    const spectrum = new Float64Array(N * 2);
-    fft.transform(spectrum, input);
-    
-    let maxPower = -Infinity;
-    let peakBin = -1;
-    const fLowBin = Math.floor(3 * N / fs);
-    const fHighBin = Math.ceil(12 * N / fs);
-  
-    for (let i = fLowBin; i <= fHighBin; i++) {
-      const p = spectrum[i * 2]**2 + spectrum[i * 2 + 1]**2;
-      if (p > maxPower) {
-        maxPower = p;
-        peakBin = i;
-      }
-    }
-    const peakFrequency = (peakBin * fs) / N;
-    
-    return {
-      peakFrequency: peakFrequency,
-      tremorAmplitude: tremorAmplitudeCm,
-      tremorPower: maxPower,
-    };
-  }
-  
+  /** * 應用帶通濾波器 (使用 Fili, 保持不變) */
   function applyBandpass(data, fs, fLow, fHigh) {
-    // ... (省略與前一回答相同的程式碼) ...
-    const fili = new Fili.default();
+    if (typeof Fili === 'undefined') throw new Error('Fili library is not loaded.');
+    const fili = new Fili();
     const butterworth = fili.butterworth({ order: 5, characteristic: 'bandpass', Fs: fs, Fc: (fLow + fHigh) / 2, BW: fHigh - fLow });
     return butterworth.multiStep(data);
   }
   
+  /** * 震顫計算 (已修改為使用 dsp.js) */
+  function calculateTremorMetrics(filtX, filtY, filtZ, fs) {
+    // --- 檢查 DSP ---
+    if (typeof DSP === 'undefined') {
+      throw new Error('dsp.js library is not loaded.');
+    }
+    // --- 檢查結束 ---
   
-  // --- 數學工具函數 (NEW) ---
+    // 1. 震顫振幅 (保持不變)
+    const tremorMagnitude = filtX.map((val, i) => Math.sqrt(val**2 + filtY[i]**2 + filtZ[i]**2));
+    if (tremorMagnitude.length === 0) {
+       return { peakFrequency: NaN, tremorAmplitude: NaN, tremorPower: NaN }; // 沒有數據無法計算
+    }
+    const rmsSum = tremorMagnitude.reduce((acc, val) => acc + val**2, 0);
+    const tremorAmplitude = Math.sqrt(rmsSum / tremorMagnitude.length);
+    const tremorAmplitudeCm = tremorAmplitude * 100;
   
-  function getMeanSD(data) {
-    if (data.length === 0) return { mean: 0, sd: 0 };
-    const sum = data.reduce((acc, val) => acc + val, 0);
-    const mean = sum / data.length;
-    const variance = data.reduce((acc, val) => acc + (val - mean) ** 2, 0) / (data.length - 1);
-    const sd = Math.sqrt(variance);
-    return { mean, sd: sd || 0 }; // 處理 data.length = 1 的情況
+    // 2. 主頻率 (使用 dsp.js 的 FFT)
+    const bufferSize = 1024; // FFT size (power of 2)
+    const fft = new DSP.FFT(bufferSize, fs); // <-- 建立 dsp.js FFT 實例
+  
+    // 準備輸入數據
+    const inputBuffer = tremorMagnitude.slice(0, bufferSize);
+     // 如果 inputBuffer 長度小於 bufferSize，dsp.js 會自動補零
+    
+    fft.forward(inputBuffer); // <-- 執行 FFT
+    const spectrum = fft.spectrum; // <-- 取得頻譜 (幅度)
+  
+    let maxMagnitude = -Infinity;
+    let peakIndex = -1;
+  
+    // 尋找 3-12 Hz 範圍內的峰值
+    const fLowIndex = Math.max(1, Math.floor(3 * bufferSize / fs)); // 忽略直流
+    const fHighIndex = Math.min(bufferSize / 2, Math.ceil(12 * bufferSize / fs));
+  
+    // 確保索引範圍有效
+    if(fLowIndex >= spectrum.length || fHighIndex < 0) {
+        console.warn("Frequency range for FFT analysis is invalid or out of bounds.");
+        return { peakFrequency: NaN, tremorAmplitude: tremorAmplitudeCm, tremorPower: NaN };
+    }
+  
+    for (let i = fLowIndex; i <= Math.min(fHighIndex, spectrum.length - 1); i++) {
+      if (spectrum[i] > maxMagnitude) {
+        maxMagnitude = spectrum[i];
+        peakIndex = i;
+      }
+    }
+    
+    const peakFrequency = (peakIndex !== -1) ? (peakIndex * fs) / bufferSize : NaN;
+    const peakPower = (maxMagnitude !== -Infinity) ? maxMagnitude**2 : -Infinity; // 功率是幅度的平方
+  
+    return {
+      peakFrequency: peakFrequency,
+      tremorAmplitude: tremorAmplitudeCm,
+      tremorPower: peakPower,
+    };
   }
   
+  
+  // --- 數學工具函數 (保持不變, 稍微加強健壯性) ---
+  function getMeanSD(data) {
+    const n = data.length;
+    if (n === 0) return { mean: NaN, sd: NaN }; // 返回 NaN 而不是 0
+    const sum = data.reduce((acc, val) => acc + val, 0);
+    const mean = sum / n;
+    if (n === 1) return { mean: mean, sd: 0 }; // 單點數據標準差為 0
+    // 樣本標準差 (N-1)
+    const variance = data.reduce((acc, val) => acc + (val - mean) ** 2, 0) / (n - 1);
+    const sd = Math.sqrt(variance);
+    return { mean, sd };
+  }
   function getDistance3D(p1, p2) {
     return Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2);
   }
-  
-  // 向量幾何：計算點 P 到 "AB直線" 的垂直距離
   function getPerpendicularDistance(p, a, b) {
     const ap = { x: p.x - a.x, y: p.y - a.y, z: p.z - a.z };
     const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
-    
     const magAB2 = ab.x**2 + ab.y**2 + ab.z**2;
-    if (magAB2 === 0) return getDistance3D(p, a); // 起點終點重合
-  
+    // 防止除以零，如果起點終點重合，距離就是點到起點的距離
+    if (magAB2 < 1e-12) return getDistance3D(p, a);
     const dot = ap.x * ab.x + ap.y * ab.y + ap.z * ab.z;
-    const t = Math.max(0, Math.min(1, dot / magAB2)); // 投影點在線段上的比例
-  
-    // 投影點
-    const projection = {
-      x: a.x + t * ab.x,
-      y: a.y + t * ab.y,
-      z: a.z + t * ab.z,
-    };
-    
+    // 將投影點限制在線段 AB 之間
+    const t = Math.max(0, Math.min(1, dot / magAB2));
+    const projection = { x: a.x + t * ab.x, y: a.y + t * ab.y, z: a.z + t * ab.z };
     return getDistance3D(p, projection);
   }
