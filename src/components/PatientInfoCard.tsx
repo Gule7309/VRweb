@@ -4,7 +4,7 @@ import { User, Calendar, Clock, Headphones, Target } from "lucide-react";
 
 interface PatientData {
   name: string;
-  age: number;
+  age: number | string;
   gender: string;
   testDate: string;
   testDuration: string;
