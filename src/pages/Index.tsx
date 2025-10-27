@@ -1,13 +1,19 @@
+// src/pages/Index.tsx
+
 import { useState, useEffect } from "react";
 // 匯入所有需要的 Firestore 函式
 import { db } from "@/firebase";
-// (已移除 limit)
 import { doc, getDoc, collection, getDocs, query, orderBy, onSnapshot } from "firebase/firestore";
 
 // 匯入您的所有元件
 import { PatientInfoCard } from "@/components/PatientInfoCard";
 import { MMSERadarChart } from "@/components/MMSERadarChart";
-import { HandMovementVisualization } from "@/components/HandMovementVisualization";
+// 匯入 HandMovementVisualization 及其類型
+import { 
+  HandMovementVisualization, 
+  type HandDataPoint, 
+  // type HandMetrics // 已移除
+} from "@/components/HandMovementVisualization";
 import { CognitiveScoreCards } from "@/components/CognitiveScoreCards";
 import { RiskAssessment } from "@/components/RiskAssessment";
 import { TrendChart } from "@/components/TrendChart";
@@ -57,7 +63,7 @@ const levelIdToMmseIndex: { [key: string]: number } = {
   'level_10': 8, 'level_3': 9, 'level_1': 10,
 };
 
-// --- 變更: 複製 CognitiveScoreCards 的分域設定，用於計算歷史資料 ---
+// --- 複製 CognitiveScoreCards 的分域設定，用於計算歷史資料 ---
 const cognitiveDomains = [
   { name: "定向力", tests: ["定向力(時間)", "定向力(地點)"] },
   { name: "記憶力", tests: ["短期記憶", "近期記憶"] },
@@ -66,13 +72,13 @@ const cognitiveDomains = [
   { name: "視覺空間", tests: ["畫圖"] }
 ];
 
-// --- 變更: 匯出 HistoricalTrendData 型別 ---
+// --- 匯出 HistoricalTrendData 型別 ---
 export interface HistoricalTrendData {
   score: number;
   date: Date;
 }
 
-// --- 變更: 匯出 TrendChartDataPoint 型別 ---
+// --- 匯出 TrendChartDataPoint 型別 ---
 export interface TrendChartDataPoint {
   month: string;
   總分: number;
@@ -100,12 +106,52 @@ const formatTrendDate = (date: Date) => {
 };
 
 
+// --- 新增 CSV 解析函式 ---
+/**
+ * 解析從 Firebase Storage 下載的軌跡 CSV 檔案。
+ * 格式: Type,X,Y,Z,Time,TriggerPressed
+ */
+const parseTrajectoryCsv = (csvText: string): HandDataPoint[] => {
+  const dataPoints: HandDataPoint[] = [];
+  // 用 '\n' (換行) 拆分每一行，並過濾掉空行
+  const lines = csvText.split('\n').filter(line => line.trim() !== '');
+  
+  // 從索引 1 開始，跳過標頭 (Header)
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const cols = line.split(',');
+
+    // 確保 CSV 格式正確 (6 欄)
+    if (cols.length === 6) {
+      const type = cols[0];
+      // 確保 Type 是我們需要的
+      if (type === "RightHand" || type === "LeftHand") {
+        dataPoints.push({
+          type: type,
+          x: parseFloat(cols[1]),
+          y: parseFloat(cols[2]),
+          z: parseFloat(cols[3]),
+          time: parseFloat(cols[4]),
+          triggerPressed: parseFloat(cols[5]) // 0 或 1
+        });
+      }
+    }
+  }
+  return dataPoints;
+};
+// --- CSV 解析函式結束 ---
+
+
 const Index = () => {
   // State for latest data
   const [patientData, setPatientData] = useState(defaultPatientData);
   const [mmseResults, setMmseResults] = useState(defaultMmseResults);
   
-  // --- 變更: 建立 "所有" 測驗的歷史紀錄 State ---
+  // --- 為 HandMovementVisualization 新增 state ---
+  const [handMovementData, setHandMovementData] = useState<HandDataPoint[]>([]);
+  // const [handMetrics, setHandMetrics] = useState<HandMetrics>({ ... }); // 已移除
+
+  // --- 建立 "所有" 測驗的歷史紀錄 State ---
   const [historicalData, setHistoricalData] = useState<HistoricalTrendData[]>([]);
   const [trendChartData, setTrendChartData] = useState<TrendChartDataPoint[]>([]);
 
@@ -116,7 +162,7 @@ const Index = () => {
     const userId = "17yNY7EQwUOK9Ai8O0fFIVhED1J3";
 
     const testsCollectionRef = collection(db, "Users", userId, "tests");
-    // --- 變更: 查詢 "所有" 測驗，不再 limit(1) ---
+    // --- 查詢 "所有" 測驗，不再 limit(1) ---
     const allTestsQuery = query(
       testsCollectionRef,
       orderBy("startTimestamp", "desc") // 仍然排序，最新的在最前面
@@ -130,7 +176,7 @@ const Index = () => {
           return;
         }
 
-        // --- 變更: 繁重的資料處理開始 ---
+        // --- 繁重的資料處理開始 ---
 
         // 1. 處理 "RiskAssessment" 的資料 (輕量)
         const trendDataForRisk = allTestsSnapshot.docs
@@ -142,7 +188,6 @@ const Index = () => {
         setHistoricalData(trendDataForRisk);
 
         // 2. 處理 "TrendChart" 的資料 (重量級)
-        // 我們將遍歷 "所有" 測驗，並為 "每一筆" 抓取 "levelResults"
         const chartDataPromises = allTestsSnapshot.docs.map(async (testDoc) => {
           const testData = testDoc.data();
           const levelsSnapshot = await getDocs(collection(db, testDoc.ref.path, "levelResults"));
@@ -184,10 +229,9 @@ const Index = () => {
         const processedChartData = await Promise.all(chartDataPromises);
         setTrendChartData(processedChartData.reverse()); // 變為時間正序
 
-        // --- 變更結束 ---
+        // --- 歷史資料處理結束 ---
 
         // --- 3. 處理 "最新一筆" 測驗的詳細資料 (給儀表板上半部) ---
-        // (這部分邏輯與您上一版完全相同，只是我們從 allTestsSnapshot 中取第0筆)
         const latestTestDoc = allTestsSnapshot.docs[0];
         const latestTestId = latestTestDoc.id;
         const latestTestData = latestTestDoc.data();
@@ -214,11 +258,48 @@ const Index = () => {
         const levelsSnapshotForLatest = await getDocs(levelsCollectionRef); // 抓取最新一筆的levelResults
 
         if (!levelsSnapshotForLatest.empty) {
-          levelsSnapshotForLatest.forEach((levelDoc) => {
+          
+          // 初始化手部資料變數
+          let latestHandData: HandDataPoint[] = [];
+          // let latestHandMetrics: HandMetrics = { ... }; // 已移除
+
+          // --- 使用 for...of 迴圈來正確處理 'await' ---
+          for (const levelDoc of levelsSnapshotForLatest.docs) {
             const levelId = levelDoc.id;
             const levelData = levelDoc.data();
-            const mmseIndex = levelIdToMmseIndex[levelId];
             
+            // --- 專門處理 level_1 的手部資料 (包含 fetch) ---
+            if (levelId === 'level_1') {
+              const csvUrl = levelData.files?.trajectoryCsvUrl;
+              
+              if (csvUrl) {
+                console.log("偵測到軌跡 CSV，正在下載:", csvUrl);
+                try {
+                  // 1. 下載 CSV 檔案
+                  const response = await fetch(csvUrl);
+                  if (!response.ok) {
+                    throw new Error(`Failed to fetch CSV: ${response.statusText}`);
+                  }
+                  const csvText = await response.text();
+                  
+                  // 2. 解析 CSV 文字
+                  latestHandData = parseTrajectoryCsv(csvText);
+                  console.log(`成功解析 ${latestHandData.length} 筆軌跡資料`);
+
+                } catch (e) {
+                  console.error("抓取或解析軌跡 CSV 失敗:", e);
+                  latestHandData = []; // 確保失敗時是空陣列
+                }
+              }
+              
+              // 這些指標仍在 level_1 文件上 (已移除)
+              // latestHandMetrics.avgSpeed = levelData.averageSpeed ?? 0; // 已移除
+              // latestHandMetrics.suggestions = levelData.aiSuggestions ?? [...]; // 已移除
+            }
+            // --- 手部資料處理結束 ---
+
+            // --- MMSE 分數與檔案處理 ---
+            const mmseIndex = levelIdToMmseIndex[levelId];
             if (mmseIndex !== undefined) {
               const targetItem = combinedMmseResults[mmseIndex];
               targetItem.score = levelData.score ?? targetItem.score;
@@ -244,7 +325,13 @@ const Index = () => {
                 else targetItem.description = `患者正確選擇了 "${chosen}"。`;
               }
             }
-          });
+            // --- MMSE 處理結束 ---
+          }
+          // --- for...of 迴圈結束 ---
+
+          // --- 在迴圈 "之後" 設定 state ---
+          setHandMovementData(latestHandData);
+          // setHandMetrics(latestHandMetrics); // 已移除
         }
         
         setPatientData(combinedPatientData);
@@ -267,11 +354,26 @@ const Index = () => {
       unsubscribe();
     };
 
-  }, []);
+  }, []); // 空依賴陣列，確保 useEffect 只執行一次
 
   // (您的 JSX 渲染部分... )
-  if (isLoading) { /* ... */ }
-  if (error) { /* ... */ }
+  if (isLoading) { 
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-background">
+        <div className="text-primary text-lg">載入中，請稍候...</div>
+      </div>
+    );
+  }
+
+  if (error) { 
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-background">
+        <div className="text-destructive text-lg">
+          資料載入失敗: {error.message}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -293,20 +395,24 @@ const Index = () => {
             <MMSERadarChart data={mmseResults} />
           </div>
           <div className="lg:col-span-1">
-            <HandMovementVisualization />
+            {/* 傳入真實的、解析過的 CSV 資料 (已移除 metrics) */}
+            <HandMovementVisualization 
+              handData={handMovementData} 
+              // metrics={handMetrics} // 已移除
+            />
           </div>
         </div>
         <CognitiveScoreCards scores={mmseResults} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
-          {/* --- 變更: 傳入 "historicalData" (總分歷史) --- */}
+          {/* --- 傳入 "historicalData" (總分歷史) --- */}
           <RiskAssessment 
             totalScore={patientData.totalScore} 
             trendData={historicalData} 
           />
           
-          {/* --- 變更: 傳入 "trendChartData" (分項歷史) --- */}
+          {/* --- 傳入 "trendChartData" (分項歷史) --- */}
           <TrendChart data={trendChartData} />
         </div>
       </div>

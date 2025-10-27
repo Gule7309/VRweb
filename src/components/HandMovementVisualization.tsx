@@ -1,139 +1,168 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-// --- 移除 Zap 和 RotateCcw ---
-import { Move3D, TrendingUp } from "lucide-react";
-import { useEffect, useState } from "react";
+// 移除 Badge, TrendingUp, Bot
+import { Move } from "lucide-react";
+import { 
+  ScatterChart, 
+  Scatter, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Legend 
+} from "recharts";
+import { useMemo } from "react";
 
-export const HandMovementVisualization = () => {
-  const [animationPhase, setAnimationPhase] = useState(0);
+const TRIM_FIRST = 120; // 去掉前120筆
 
-  // 模擬3D移動數據 (只保留 avgVelocity)
-  const movementData = {
-    avgVelocity: 0.85, // m/s
-    // tremor: 0.12, // 移除
-    // precision: 0.78, // 移除
-    // stability: 0.69, // 移除
-    // pathEfficiency: 0.73, // 移除
-  };
+export interface HandDataPoint {
+  type: "RightHand" | "LeftHand";
+  x: number;
+  y: number;
+  z: number;
+  time: number;
+  triggerPressed: number;
+}
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAnimationPhase(prev => (prev + 1) % 4);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+interface PlotPoint {
+  x: number;
+  y: number;
+}
 
-  // (保留輔助函式，因為 avgVelocity 仍會用到)
-  const getMetricColor = (value: number) => {
-    if (value >= 0.8) return "text-success";
-    if (value >= 0.6) return "text-warning";
-    return "text-destructive";
-  };
-  const getMetricBadge = (value: number) => {
-    if (value >= 0.8) return { label: "優秀", color: "bg-success text-white" };
-    if (value >= 0.6) return { label: "正常", color: "bg-warning text-white" };
-    return { label: "需改善", color: "bg-destructive text-white" };
-  };
+// 移除 HandMetrics 介面
+
+// 移除 metrics prop
+interface HandMovementVisualizationProps {
+  handData: HandDataPoint[];
+}
+
+// 移除 getSpeedStatus 輔助函式
+
+// 移除 metrics prop
+export const HandMovementVisualization = ({ handData }: HandMovementVisualizationProps) => {
+  
+  // 移除 speedStatus 的計算
+
+  // (useMemo 處理資料的邏輯保持不變)
+  const processedData = useMemo(() => {
+    if (!handData || handData.length <= TRIM_FIRST) {
+      return { right: [], left: [], trigger: [] };
+    }
+    const trimmedData = handData.slice(TRIM_FIRST);
+    const rightOrigin = trimmedData.find(d => d.type === "RightHand");
+    const leftOrigin = trimmedData.find(d => d.type === "LeftHand");
+    const rightPath: PlotPoint[] = [];
+    const leftPath: PlotPoint[] = [];
+    const triggerPoints: PlotPoint[] = [];
+
+    trimmedData.forEach(point => {
+      let origin = null;
+      let targetArray = null;
+
+      if (point.type === "RightHand") {
+        origin = rightOrigin;
+        targetArray = rightPath;
+      } else if (point.type === "LeftHand") {
+        origin = leftOrigin;
+        targetArray = leftPath;
+      }
+
+      if (origin && targetArray) {
+        const plotPoint = {
+          x: point.x - origin.x,
+          y: point.y - origin.y
+        };
+        targetArray.push(plotPoint);
+        if (point.triggerPressed === 1 || point.triggerPressed > 0) {
+          triggerPoints.push(plotPoint);
+        }
+      }
+    });
+    return { right: rightPath, left: leftPath, trigger: triggerPoints };
+  }, [handData]);
 
   return (
-    <Card className="shadow-medical border-0">
+    <Card className="shadow-medical border-0 h-full">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-primary">
-          <Move3D className="h-5 w-5" />
+          <Move className="h-5 w-5" />
           手部控制器 3D 移動分析
         </CardTitle>
       </CardHeader>
+      {/* 移除 CardContent 的 space-y-4 */}
       <CardContent>
-        {/* 3D軌跡可視化區域 (保持不變) */}
-        <div className="relative h-48 mb-6 bg-gradient-to-br from-primary/5 to-accent/5 rounded-lg border border-primary/20 overflow-hidden">
-          <div className="absolute inset-0 flex items-center justify-center">
-            {/* 模擬3D軌跡 */}
-            <div className="relative w-32 h-32">
-              {/* 中心點 */}
-              <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-primary rounded-full transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
-              {/* 軌跡路徑 */}
-              <svg className="w-full h-full" viewBox="0 0 128 128">
-                <path
-                  d="M20,64 Q32,20 64,32 T108,64 Q96,108 64,96 T20,64"
-                  fill="none"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth="2"
-                  strokeDasharray="4,2"
-                  opacity="0.6"
-                  className={`transition-all duration-1000 ${animationPhase % 2 === 0 ? 'opacity-60' : 'opacity-30'}`}
-                />
-                <path
-                  d="M32,32 Q64,16 96,32 Q112,64 96,96 Q64,112 32,96 Q16,64 32,32"
-                  fill="none"
-                  stroke="hsl(var(--accent))"
-                  strokeWidth="1.5"
-                  strokeDasharray="2,3"
-                  opacity="0.4"
-                  className={`transition-all duration-1000 ${animationPhase % 2 === 1 ? 'opacity-40' : 'opacity-20'}`}
-                />
-              </svg>
-              {/* 移動點 */}
-              <div
-                className={`absolute w-3 h-3 bg-accent rounded-full transition-all duration-1000 ${
-                  animationPhase === 0 ? 'top-8 left-8' :
-                  animationPhase === 1 ? 'top-8 right-8' :
-                  animationPhase === 2 ? 'bottom-8 right-8' : 'bottom-8 left-8'
-                }`}
-                style={{ transform: 'translate(-50%, -50%)' }}
-              ></div>
-            </div>
-          </div>
-          {/* 座標軸標示 */}
-          <div className="absolute bottom-2 left-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-0.5 bg-chart-1"></div>
-              <span>X軸</span>
-            </div>
-            <div className="flex items-center gap-1 mt-1">
-              <div className="w-0.5 h-3 bg-chart-2"></div>
-              <span>Y軸</span>
-            </div>
-          </div>
+        
+        {/* 1. 2D 散點圖 */}
+        {/* --- 變更: 增加圖表高度 --- */}
+        <div 
+          className="w-full h-[400px] border rounded-lg p-4 bg-gray-50/50" 
+          aria-label="手部移動軌跡 2D 散點圖"
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart
+              margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+            >
+              <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+              <XAxis 
+                type="number" 
+                dataKey="x" 
+                name="X軸" 
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                label={{ value: "X軸", position: 'insideBottom', offset: -10, fill: "hsl(var(--foreground))", fontSize: 12 }}
+              />
+              <YAxis 
+                type="number" 
+                dataKey="y" 
+                name="Y軸" 
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                label={{ value: "Y軸", position: 'insideLeft', angle: -90, offset: -5, fill: "hsl(var(--foreground))", fontSize: 12 }}
+              />
+              <Tooltip 
+                cursor={{ strokeDasharray: '3 3' }} 
+                contentStyle={{ 
+                  backgroundColor: "hsl(var(--card))", 
+                  borderColor: "hsl(var(--border))",
+                  borderRadius: "0.5rem",
+                  fontSize: "12px",
+                  padding: "8px"
+                }}
+                itemStyle={{ padding: 0 }}
+              />
+              <Legend 
+                iconType="circle"
+                verticalAlign="top"
+                align="left"
+                wrapperStyle={{ fontSize: "12px", paddingBottom: "10px", marginLeft: "20px" }}
+              />
+              <Scatter 
+                name="RightHand" 
+                data={processedData.right} 
+                fill="#F87171" 
+                shape="circle" 
+                r={2}
+              />
+              <Scatter 
+                name="LeftHand" 
+                data={processedData.left} 
+                fill="#60A5FA" 
+                shape="circle" 
+                r={2}
+              />
+              <Scatter 
+                name="Trigger Press"
+                data={processedData.trigger}
+                fill="#FACC15" 
+                shape="star" 
+                r={8}
+              />
+            </ScatterChart>
+          </ResponsiveContainer>
         </div>
-
-        {/* 移動指標 (只保留平均速度和AI建議) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-3">
-            {/* 平均速度 */}
-            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-chart-1" />
-                <span className="text-sm font-medium">平均速度</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`font-bold ${getMetricColor(movementData.avgVelocity)}`}>
-                  {movementData.avgVelocity.toFixed(2)} m/s {/* 修正: 使用 toFixed */}
-                </span>
-                <Badge className={getMetricBadge(movementData.avgVelocity).color}>
-                  {getMetricBadge(movementData.avgVelocity).label}
-                </Badge>
-              </div>
-            </div>
-
-            {/* --- 震顫指數區塊已刪除 --- */}
-
-            {/* --- 穩定性區塊已刪除 --- */}
-
-          </div>
-
-          <div className="space-y-3">
-            {/* AI 分析建議 */}
-            <div className="p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 h-full flex flex-col justify-center"> {/* 使用 h-full */}
-              <h4 className="font-semibold text-foreground mb-2">AI 分析建議</h4>
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p>• 手部震顫程度輕微，在正常範圍內</p>
-                <p>• 移動軌跡顯示中度精細動作障礙</p>
-                <p>• 建議加強手部精細動作訓練</p>
-                <p>• 持續追蹤移動模式變化</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        
+        {/* --- 變更: 移除底部的資訊卡 --- */}
+        
       </CardContent>
     </Card>
   );
